@@ -297,12 +297,17 @@
     transition:color .15s ease;
   }
   .navbtn .icon{ font-size:19px; }
+  .navbtn .icon svg{
+    width:21px; height:21px; display:block; margin:0 auto;
+    fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round;
+  }
   .navbtn.active{ color:var(--accent); }
   .navbtn.fab .icon{
     width:38px; height:38px; border-radius:11px; background:var(--accent); color:var(--accent-contrast);
     display:flex; align-items:center; justify-content:center; font-size:20px; margin-bottom:-2px;
     transition:transform .15s ease;
   }
+  .navbtn.fab .icon svg{ width:20px; height:20px; stroke-width:2.2; }
   .navbtn.fab:active .icon{ transform:scale(.9); }
   .navbtn.fab.active .icon{ background:var(--accent-dim); color:#fff; }
 
@@ -481,19 +486,19 @@
   <nav class="bottomnav">
     <div class="nav-indicator" id="navIndicator"></div>
     <button class="navbtn active" data-tab="inicio" onclick="irATab('inicio')">
-      <span class="icon">🏠</span>Inicio
+      <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1H9a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1h2.5a1 1 0 0 0 1-1v-9"/></svg></span>Inicio
     </button>
     <button class="navbtn" data-tab="fijos" onclick="irATab('fijos')">
-      <span class="icon">📌</span>Fijos
+      <span class="icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="16" rx="2.5"/><path d="M3.5 9.5h17"/><path d="M8 3v4M16 3v4"/><path d="M8.5 14.2l2 2 4.2-4.4"/></svg></span>Fijos
     </button>
     <button class="navbtn fab" data-tab="agregar" onclick="irATab('agregar')">
-      <span class="icon">＋</span>Agregar
+      <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Agregar
     </button>
     <button class="navbtn" data-tab="analisis" onclick="irATab('analisis')">
-      <span class="icon">📊</span>Análisis
+      <span class="icon"><svg viewBox="0 0 24 24"><path d="M4.5 20V12"/><path d="M12 20V4"/><path d="M19.5 20v-8.5"/></svg></span>Análisis
     </button>
     <button class="navbtn" data-tab="ahorro" onclick="irATab('ahorro')">
-      <span class="icon">🐷</span>Ahorro
+      <span class="icon"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6.5" rx="7.5" ry="2.7"/><path d="M4.5 6.5v5.3c0 1.5 3.4 2.7 7.5 2.7s7.5-1.2 7.5-2.7V6.5"/><path d="M4.5 11.8v5.3c0 1.5 3.4 2.7 7.5 2.7s7.5-1.2 7.5-2.7v-5.3"/></svg></span>Ahorro
     </button>
   </nav>
 </div>

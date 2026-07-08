@@ -713,8 +713,8 @@ function renderResumenMesAnalisis(r){
 }
 
 function renderFijoVariable(r){
-  var total = r.totalFijo + r.totalVariable;
-  if(total <= 0){ return; }
+  var total = (Number(r.totalFijo)||0) + (Number(r.totalVariable)||0);
+  if(!total || isNaN(total) || total <= 0){ return; }
   document.getElementById('cardFijoVariable').style.display = 'block';
   var pctFijo = Math.round((r.totalFijo/total)*100);
   var pctVar = 100 - pctFijo;
