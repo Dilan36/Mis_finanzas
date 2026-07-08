@@ -121,13 +121,44 @@ function fmt(n){
   n = Number(n)||0;
   return '$' + Math.round(n).toLocaleString('es-CO');
 }
+function skeletonLineas(n, alturas){
+  var out = '';
+  for(var i=0;i<n;i++){
+    var h = (alturas && alturas[i]) || 14;
+    var w = 100 - (i*12 % 40);
+    out += '<div class="skel skel-line" style="height:'+h+'px; width:'+w+'%;"></div>';
+  }
+  return out;
+}
+function animarNumero(el, valorFinal, prefijoClase){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduce){ el.textContent = fmt(valorFinal); return; }
+  var inicio = 0;
+  var duracion = 650;
+  var t0 = null;
+  function paso(ts){
+    if(!t0) t0 = ts;
+    var p = Math.min((ts - t0) / duracion, 1);
+    var actual = inicio + (valorFinal - inicio) * (1 - Math.pow(1-p, 3)); // ease-out cúbico
+    el.textContent = fmt(actual);
+    if(p < 1) requestAnimationFrame(paso);
+    else el.textContent = fmt(valorFinal);
+  }
+  requestAnimationFrame(paso);
+}
 
 // ---------------- NAV ----------------
+var ORDEN_TABS = ['inicio','fijos','agregar','ahorro'];
 function irATab(nombre){
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
   document.getElementById('tab-'+nombre).classList.add('active');
   document.querySelectorAll('.navbtn').forEach(function(b){ b.classList.remove('active'); });
   document.querySelector('.navbtn[data-tab="'+nombre+'"]').classList.add('active');
+  var ind = document.getElementById('navIndicator');
+  if(ind){
+    var idx = ORDEN_TABS.indexOf(nombre);
+    ind.style.transform = 'translateX(' + (idx*100) + '%)';
+  }
 }
 
 // ---------------- INIT ----------------
@@ -171,8 +202,8 @@ function cargarInicio(){
   renderPills('pillsInicio', mesesInfo.meses, mesSeleccionadoInicio, function(m){
     mesSeleccionadoInicio = m; cargarInicio();
   });
-  document.getElementById('cardDisponible').innerHTML = cardDisponibleHead() + '<div class="loading">Cargando…</div>';
-  document.getElementById('listaUltimos').innerHTML = '<div class="loading">Cargando…</div>';
+  document.getElementById('cardDisponible').innerHTML = cardDisponibleHead() + skeletonLineas(3, [34,14,14]);
+  document.getElementById('listaUltimos').innerHTML = skeletonLineas(4, [30,30,30,30]);
 
   apiCall('getResumenMes', { mesAbr: mesSeleccionadoInicio }).then(function(r){
     ultimoResumen = r;
@@ -225,11 +256,12 @@ function renderDisponible(){
   var claseColor = r.restante >= 0 ? 'pos' : 'neg';
   var oculto = '••••••';
   cont.innerHTML = cardDisponibleHead() +
-    '<div class="big-number '+claseColor+'">'+fmt(r.restante)+'</div>' +
+    '<div class="big-number '+claseColor+'" id="numDisponible">$0</div>' +
     '<div class="sub-row"><span>Ingreso</span><b>'+(mostrarIngresos?fmt(r.ingreso):oculto)+'</b></div>' +
     '<div class="sub-row"><span>Ahorro aportado</span><b>'+(mostrarIngresos?fmt(r.ahorro):oculto)+'</b></div>' +
     (r.retiro>0 ? '<div class="sub-row"><span>Retiro del ahorro</span><b>'+fmt(r.retiro)+'</b></div>' : '') +
     '<div class="sub-row"><span>Gasto real</span><b>'+fmt(r.gastoReal)+'</b></div>';
+  animarNumero(document.getElementById('numDisponible'), r.restante);
 }
 
 function renderDonut(categorias){
@@ -261,7 +293,7 @@ function cargarFijos(){
     mesSeleccionadoFijos = m; cargarFijos();
   });
   document.getElementById('progresoTexto').textContent = 'Cargando…';
-  document.getElementById('listaFijos').innerHTML = '<div class="loading">Cargando…</div>';
+  document.getElementById('listaFijos').innerHTML = skeletonLineas(5, [40,40,40,40,40]);
 
   apiCall('getFijosEstado', { mesAbr: mesSeleccionadoFijos }).then(function(r){
     if(r.error){
