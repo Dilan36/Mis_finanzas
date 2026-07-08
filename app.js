@@ -727,7 +727,8 @@ function renderFijoVariable(r){
 
 function renderRanking(r){
   if(!r.categorias || r.categorias.length === 0){
-    document.getElementById('listaRanking').innerHTML = '<div class="empty">Sin gastos registrados este mes.</div>';
+    var debugTxt = r.debug ? '<pre style="white-space:pre-wrap; font-size:10px; color:var(--muted); text-align:left; margin-top:10px;">'+JSON.stringify(r.debug, null, 1)+'</pre>' : '';
+    document.getElementById('listaRanking').innerHTML = '<div class="empty">Sin gastos registrados este mes.</div>' + debugTxt;
     return;
   }
   var maxGasto = r.categorias[0].gasto;
