@@ -264,9 +264,32 @@
     display:flex; padding:8px 6px calc(8px + env(safe-area-inset-bottom));
   }
   .nav-indicator{
-    position:absolute; top:0; left:0; height:2px; width:25%;
+    position:absolute; top:0; left:0; height:2px; width:20%;
     background:var(--accent); transition:transform .25s cubic-bezier(.4,0,.2,1);
   }
+
+  /* Análisis */
+  .cmp-badge{ font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; }
+  .cmp-badge.up{ background:var(--red-bg); color:var(--red); }
+  .cmp-badge.down{ background:var(--green-bg); color:var(--green); }
+  .fv-row{ margin-bottom:12px; }
+  .fv-row-head{ display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
+  .fv-bar{ height:8px; background:var(--border); border-radius:6px; overflow:hidden; }
+  .fv-fill{ height:100%; border-radius:6px; }
+  .rank-item{ padding:10px 0; border-bottom:1px solid var(--border); }
+  .rank-item:last-child{ border-bottom:none; }
+  .rank-item-head{ display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
+  .rank-item-head .nombre{ font-weight:600; font-family:'Space Grotesk',sans-serif; }
+  .rank-item-head .pct{ color:var(--muted); font-size:12px; }
+  .rank-bar{ height:6px; background:var(--border); border-radius:6px; overflow:hidden; }
+  .rank-fill{ height:100%; background:var(--accent); border-radius:6px; }
+  .rank-fill.excedido{ background:var(--red); }
+  .rank-excedido-tag{ font-size:11px; color:var(--red); margin-top:3px; }
+  .tendencia-bars{ display:flex; align-items:flex-end; gap:8px; height:110px; padding-top:10px; }
+  .tendencia-col{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; }
+  .tendencia-bar{ width:100%; border-radius:5px 5px 0 0; background:var(--border); transition:height .3s ease; }
+  .tendencia-bar.actual{ background:var(--accent); }
+  .tendencia-label{ font-size:10px; color:var(--muted); margin-top:6px; }
   .navbtn{
     flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
     background:none; border:none; padding:6px 0; cursor:pointer;
@@ -285,10 +308,29 @@
 
   .spinner{ display:inline-block; width:14px; height:14px; border:2px solid rgba(0,0,0,.25); border-top-color:currentColor; border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; margin-right:6px; }
   @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* Pantalla de bloqueo (Face ID / Touch ID) */
+  .lock-screen{
+    display:none; min-height:100vh; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:24px; background:var(--bg); position:fixed; inset:0; z-index:100;
+  }
+  .lock-screen.show{ display:flex; }
+  .lock-icon{ font-size:44px; margin-bottom:6px; }
+  .lock-screen h2{ font-family:'Space Grotesk',sans-serif; margin:0 0 4px; font-size:20px; color:var(--text); }
+  .lock-screen p{ color:var(--muted); font-size:13px; margin:0 0 22px; }
+  .lock-error{ color:var(--red) !important; margin-top:14px !important; font-size:12px !important; min-height:16px; }
 </style>
 </head>
 <body>
-<div class="app">
+<div class="lock-screen" id="lockScreen">
+  <div class="lock-icon">🔒</div>
+  <h2>Control de Gastos</h2>
+  <p>Protegido con Face ID / Touch ID</p>
+  <button class="btn" id="btnDesbloquear" onclick="intentarDesbloqueo()" style="max-width:260px;">🔓 Desbloquear</button>
+  <p class="lock-error" id="lockError"></p>
+</div>
+
+<div class="app" id="appRoot">
 
   <!-- ============ INICIO ============ -->
   <div class="tab active" id="tab-inicio">
@@ -407,6 +449,34 @@
     </div>
   </div>
 
+  <!-- ============ ANÁLISIS ============ -->
+  <div class="tab" id="tab-analisis">
+    <div class="topbar">
+      <p class="eyebrow">Análisis</p>
+      <h1>¿En qué se va la plata?</h1>
+    </div>
+    <div class="pills" id="pillsAnalisis"></div>
+
+    <div class="card" id="cardResumenMes">
+      <div class="loading">Cargando…</div>
+    </div>
+
+    <div class="card" id="cardFijoVariable" style="display:none;">
+      <h3>Fijo vs. Variable</h3>
+      <div id="barraFijoVariable"></div>
+    </div>
+
+    <div class="card" id="cardRanking">
+      <h3>Por categoría</h3>
+      <div id="listaRanking" class="loading">Cargando…</div>
+    </div>
+
+    <div class="card" id="cardTendencia" style="display:none;">
+      <h3>Tendencia Jul–Dic</h3>
+      <div id="barrasTendencia"></div>
+    </div>
+  </div>
+
   <!-- ============ NAV ============ -->
   <nav class="bottomnav">
     <div class="nav-indicator" id="navIndicator"></div>
@@ -418,6 +488,9 @@
     </button>
     <button class="navbtn fab" data-tab="agregar" onclick="irATab('agregar')">
       <span class="icon">＋</span>Agregar
+    </button>
+    <button class="navbtn" data-tab="analisis" onclick="irATab('analisis')">
+      <span class="icon">📊</span>Análisis
     </button>
     <button class="navbtn" data-tab="ahorro" onclick="irATab('ahorro')">
       <span class="icon">🐷</span>Ahorro
@@ -522,6 +595,13 @@
       <span>Modo oscuro</span>
       <label class="switch">
         <input type="checkbox" id="chkOscuro" onchange="toggleModoOscuro()">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="settings-row">
+      <span>Face ID / Touch ID</span>
+      <label class="switch">
+        <input type="checkbox" id="chkFaceId" onchange="toggleFaceId()">
         <span class="slider"></span>
       </label>
     </div>

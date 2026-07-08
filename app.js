@@ -78,6 +78,7 @@ function registrarGastoConCola(datos){
 var COLORES = ['#1F3864','#2E7D32','#B7791F','#8E44AD','#1B9C85','#C62828','#6B7280'];
 var mesSeleccionadoInicio = null;
 var mesSeleccionadoFijos = null;
+var mesSeleccionadoAnalisis = null;
 var mesesInfo = null;
 var fijaActual = null; // {fila, montoPlaneado} en el modal
 var ultimoResumen = null;
@@ -104,6 +105,7 @@ function toggleModoOscuro(){
 }
 function abrirConfiguracion(){
   document.getElementById('chkOscuro').checked = oscuro;
+  document.getElementById('chkFaceId').checked = localStorage.getItem('faceIdActivo') === 'true';
   document.getElementById('overlayConfig').classList.add('open');
 }
 function cerrarConfiguracion(){ document.getElementById('overlayConfig').classList.remove('open'); }
@@ -111,6 +113,92 @@ function abrirHojaCalculo(){
   apiCall('getSpreadsheetUrl', {}).then(function(url){
     window.open(url, '_blank');
   }).catch(function(err){ alert('Error: '+err.message); });
+}
+
+// ============================================================
+// FACE ID / TOUCH ID (WebAuthn) — candado local del dispositivo
+// ============================================================
+function ab2b64(buf){
+  var bytes = new Uint8Array(buf);
+  var bin = '';
+  for(var i=0;i<bytes.byteLength;i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function b642ab(b64){
+  var bin = atob(b64);
+  var bytes = new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function toggleFaceId(){
+  var activar = document.getElementById('chkFaceId').checked;
+  if(activar){ activarFaceId(); }
+  else { desactivarFaceId(); }
+}
+
+function activarFaceId(){
+  if(!window.PublicKeyCredential){
+    alert('Tu navegador no soporta Face ID / Touch ID en la web.');
+    document.getElementById('chkFaceId').checked = false;
+    return;
+  }
+  var challenge = crypto.getRandomValues(new Uint8Array(32));
+  var userId = crypto.getRandomValues(new Uint8Array(16));
+  navigator.credentials.create({
+    publicKey: {
+      challenge: challenge,
+      rp: { name: 'Control de Gastos' },
+      user: { id: userId, name: 'control-gastos', displayName: 'Control de Gastos' },
+      pubKeyCredParams: [{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }],
+      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required' },
+      timeout: 60000,
+      attestation: 'none'
+    }
+  }).then(function(cred){
+    localStorage.setItem('faceIdCredId', ab2b64(cred.rawId));
+    localStorage.setItem('faceIdActivo', 'true');
+    alert('Face ID / Touch ID activado ✅. La próxima vez que abras la app, te lo va a pedir.');
+  }).catch(function(err){
+    alert('No se pudo activar: ' + err.message);
+    document.getElementById('chkFaceId').checked = false;
+  });
+}
+
+function desactivarFaceId(){
+  localStorage.removeItem('faceIdCredId');
+  localStorage.removeItem('faceIdActivo');
+}
+
+function verificarFaceId(){
+  var credId = localStorage.getItem('faceIdCredId');
+  if(!credId) return Promise.resolve(true);
+  var challenge = crypto.getRandomValues(new Uint8Array(32));
+  return navigator.credentials.get({
+    publicKey: {
+      challenge: challenge,
+      allowCredentials: [{ id: b642ab(credId), type:'public-key' }],
+      userVerification: 'required',
+      timeout: 60000
+    }
+  }).then(function(){ return true; }).catch(function(){ return false; });
+}
+
+function intentarDesbloqueo(){
+  var btn = document.getElementById('btnDesbloquear');
+  var err = document.getElementById('lockError');
+  err.textContent = '';
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Verificando…';
+  verificarFaceId().then(function(ok){
+    btn.disabled = false; btn.textContent = '🔓 Desbloquear';
+    if(ok){
+      document.getElementById('lockScreen').classList.remove('show');
+      document.getElementById('appRoot').style.display = 'block';
+      iniciarApp();
+    } else {
+      err.textContent = 'No se pudo verificar. Intenta de nuevo.';
+    }
+  });
 }
 
 function hoyISO(){
@@ -148,7 +236,7 @@ function animarNumero(el, valorFinal, prefijoClase){
 }
 
 // ---------------- NAV ----------------
-var ORDEN_TABS = ['inicio','fijos','agregar','ahorro'];
+var ORDEN_TABS = ['inicio','fijos','agregar','analisis','ahorro'];
 function irATab(nombre){
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
   document.getElementById('tab-'+nombre).classList.add('active');
@@ -159,10 +247,25 @@ function irATab(nombre){
     var idx = ORDEN_TABS.indexOf(nombre);
     ind.style.transform = 'translateX(' + (idx*100) + '%)';
   }
+  if(nombre === 'analisis') cargarAnalisis();
 }
 
 // ---------------- INIT ----------------
 window.addEventListener('DOMContentLoaded', function(){
+  var faceIdActivo = localStorage.getItem('faceIdActivo') === 'true';
+  if(faceIdActivo){
+    document.getElementById('lockScreen').classList.add('show');
+    document.getElementById('appRoot').style.display = 'none';
+  } else {
+    iniciarApp();
+  }
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('./service-worker.js').catch(function(){});
+  }
+});
+
+function iniciarApp(){
   document.getElementById('fecha').value = hoyISO();
   cargarCategorias();
   actualizarBadgeCola();
@@ -172,17 +275,14 @@ window.addEventListener('DOMContentLoaded', function(){
     mesesInfo = info;
     mesSeleccionadoInicio = info.meses[info.actual];
     mesSeleccionadoFijos = info.meses[info.actual];
+    mesSeleccionadoAnalisis = info.meses[info.actual];
     cargarInicio();
     cargarFijos();
   }).catch(function(err){
     document.getElementById('cardDisponible').innerHTML = cardDisponibleHead() + '<div class="empty">Sin conexión con la hoja. Revisa tu internet.</div>';
   });
   cargarAhorro();
-
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./service-worker.js').catch(function(){});
-  }
-});
+}
 
 function renderPills(contId, meses, seleccionado, onClick){
   var cont = document.getElementById(contId);
@@ -563,4 +663,100 @@ function guardarAhorro(idx, fila){
     if(resp.ok){ cargarAhorro(); cargarInicio(); }
     else alert(resp.mensaje);
   }).catch(function(err){ alert('Error: '+err.message); });
+}
+
+// ---------------- ANÁLISIS ----------------
+function cargarAnalisis(){
+  if(!mesesInfo) return;
+  renderPills('pillsAnalisis', mesesInfo.meses, mesSeleccionadoAnalisis, function(m){
+    mesSeleccionadoAnalisis = m; cargarAnalisis();
+  });
+  document.getElementById('cardResumenMes').innerHTML = skeletonLineas(3, [30,14,14]);
+  document.getElementById('listaRanking').innerHTML = skeletonLineas(5, [30,30,30,30,30]);
+  document.getElementById('cardFijoVariable').style.display = 'none';
+  document.getElementById('cardTendencia').style.display = 'none';
+
+  apiCall('getAnalisisMes', { mesAbr: mesSeleccionadoAnalisis }).then(function(r){
+    if(r.error){
+      document.getElementById('cardResumenMes').innerHTML = '<div class="empty">'+r.error+'</div>';
+      document.getElementById('listaRanking').innerHTML = '';
+      return;
+    }
+    renderResumenMesAnalisis(r);
+    renderFijoVariable(r);
+    renderRanking(r);
+    renderTendencia(r);
+  }).catch(function(err){
+    document.getElementById('cardResumenMes').innerHTML = '<div class="empty">Sin conexión.</div>';
+    document.getElementById('listaRanking').innerHTML = '';
+  });
+}
+
+function renderResumenMesAnalisis(r){
+  var cmpHtml = '';
+  if(r.mesAnteriorTotal !== null && r.mesAnteriorTotal > 0){
+    var diff = r.totalGeneral - r.mesAnteriorTotal;
+    var pct = Math.round((diff / r.mesAnteriorTotal) * 100);
+    if(pct !== 0){
+      var subio = pct > 0;
+      cmpHtml = '<span class="cmp-badge '+(subio?'up':'down')+'">'+(subio?'▲':'▼')+' '+Math.abs(pct)+'% vs. mes anterior</span>';
+    } else {
+      cmpHtml = '<span class="cmp-badge down">= que el mes anterior</span>';
+    }
+  }
+  document.getElementById('cardResumenMes').innerHTML =
+    '<h3>Gasto total · '+mesSeleccionadoAnalisis+'</h3>' +
+    '<div class="big-number" id="numAnalisisTotal">$0</div>' +
+    '<div class="sub-row"><span>'+(cmpHtml||'Sin datos del mes anterior')+'</span></div>' +
+    '<div class="sub-row"><span>Promedio diario</span><b>'+fmt(r.promedioDiario)+'</b></div>';
+  animarNumero(document.getElementById('numAnalisisTotal'), r.totalGeneral);
+}
+
+function renderFijoVariable(r){
+  var total = r.totalFijo + r.totalVariable;
+  if(total <= 0){ return; }
+  document.getElementById('cardFijoVariable').style.display = 'block';
+  var pctFijo = Math.round((r.totalFijo/total)*100);
+  var pctVar = 100 - pctFijo;
+  document.getElementById('barraFijoVariable').innerHTML =
+    '<div class="fv-row"><div class="fv-row-head"><span>Fijos</span><b>'+fmt(r.totalFijo)+' · '+pctFijo+'%</b></div>' +
+    '<div class="fv-bar"><div class="fv-fill" style="width:'+pctFijo+'%; background:var(--accent);"></div></div></div>' +
+    '<div class="fv-row"><div class="fv-row-head"><span>Variables</span><b>'+fmt(r.totalVariable)+' · '+pctVar+'%</b></div>' +
+    '<div class="fv-bar"><div class="fv-fill" style="width:'+pctVar+'%; background:var(--muted);"></div></div></div>';
+}
+
+function renderRanking(r){
+  if(!r.categorias || r.categorias.length === 0){
+    document.getElementById('listaRanking').innerHTML = '<div class="empty">Sin gastos registrados este mes.</div>';
+    return;
+  }
+  var maxGasto = r.categorias[0].gasto;
+  document.getElementById('listaRanking').innerHTML = r.categorias.map(function(c){
+    var pctBarra = maxGasto ? Math.round((c.gasto/maxGasto)*100) : 0;
+    var pctTotal = r.totalGeneral ? Math.round((c.gasto/r.totalGeneral)*100) : 0;
+    var excedido = c.presupuesto > 0 && c.gasto > c.presupuesto;
+    return '<div class="rank-item">' +
+      '<div class="rank-item-head"><span class="nombre">'+c.nombre+'</span>' +
+      '<span><b>'+fmt(c.gasto)+'</b> <span class="pct">'+pctTotal+'%</span></span></div>' +
+      '<div class="rank-bar"><div class="rank-fill'+(excedido?' excedido':'')+'" style="width:'+pctBarra+'%;"></div></div>' +
+      (excedido ? '<div class="rank-excedido-tag">⚠ superó el presupuesto de '+fmt(c.presupuesto)+'</div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+function renderTendencia(r){
+  if(!r.tendencia || r.tendencia.length === 0) return;
+  document.getElementById('cardTendencia').style.display = 'block';
+  var max = Math.max.apply(null, r.tendencia.map(function(t){ return t.total; }).concat([1]));
+  document.getElementById('barrasTendencia').innerHTML =
+    '<div class="tendencia-bars">' +
+    r.tendencia.map(function(t){
+      var h = Math.max(4, Math.round((t.total/max)*100));
+      var esActual = t.mes === mesSeleccionadoAnalisis;
+      return '<div class="tendencia-col">' +
+        '<div class="tendencia-bar'+(esActual?' actual':'')+'" style="height:'+h+'%;" title="'+fmt(t.total)+'"></div>' +
+        '<div class="tendencia-label">'+t.mes+'</div>' +
+        '</div>';
+    }).join('') +
+    '</div>';
 }
