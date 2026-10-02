@@ -2,12 +2,12 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Control de Gastos</title>
 <meta name="theme-color" content="#1F3864">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Gastos">
 <link rel="manifest" href="./manifest.json">
 <link rel="apple-touch-icon" href="./icon-192.png">
@@ -82,7 +82,7 @@
     text-transform:uppercase; letter-spacing:.09em;
   }
   .topbar h1{ margin:0; font-size:21px; font-weight:700; color:var(--text); letter-spacing:-.2px; }
-  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; }
+  .topbar-row{ display:flex; justify-content:space-between; align-items:flex-start; margin-top:40px; }
   .gear-btn{
     background:var(--card); border:1px solid var(--border); color:var(--text); font-size:15px;
     width:36px; height:36px; border-radius:10px; cursor:pointer; flex:0 0 auto;
@@ -171,6 +171,7 @@
   .fijo-left .nombre{ font-size:14px; font-weight:600; font-family:'Space Grotesk',sans-serif; }
   .fijo-left .parte{ font-size:11px; color:var(--muted); background:var(--bg); padding:1px 7px; border-radius:10px; margin-left:6px; font-family:'Inter',sans-serif; }
   .fijo-left .monto{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .fijo-fecha{ font-size:11px; color:var(--accent); margin-top:2px; }
   .check-btn{
     width:28px; height:28px; border-radius:8px;
     border:1px solid var(--border);
@@ -324,6 +325,43 @@
   .lock-screen h2{ font-family:'Space Grotesk',sans-serif; margin:0 0 4px; font-size:20px; color:var(--text); }
   .lock-screen p{ color:var(--muted); font-size:13px; margin:0 0 22px; }
   .lock-error{ color:var(--red) !important; margin-top:14px !important; font-size:12px !important; min-height:16px; }
+
+  /* Mascota flotante (aparece de vez en cuando) */
+  .mascota-flotante{
+    position:fixed; top:-140px; right:16px; width:92px; z-index:60;
+    transition:top .55s cubic-bezier(.34,1.56,.64,1);
+    pointer-events:none; filter:drop-shadow(0 6px 10px rgba(0,0,0,.25));
+  }
+  
+  .top-safe-spacer{
+    height:56px; display:flex; align-items:center; justify-content:center;
+    background:var(--accent);
+  }
+  .top-safe-spacer img{ width:26px; height:26px; border-radius:7px; }
+
+  .mascota-flotante.show{ top:50px; }
+  .topbar > .eyebrow{ margin-top:15px; }
+  .topbar > .ahorro-hero{ margin-top:15px; }
+
+  /* Botón + que respira suavemente para invitar a anotar un gasto */
+  .navbtn.fab .icon{ animation:respirar 2.6s ease-in-out infinite; }
+  @keyframes respirar{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.06); } }
+
+  /* Confeti */
+  .confeti-pieza{
+    position:fixed; top:-10px; width:8px; height:8px; border-radius:2px;
+    z-index:70; pointer-events:none;
+    animation:caer-confeti 1.3s ease-in forwards;
+  }
+  @keyframes caer-confeti{
+    to{ transform:translateY(110vh) rotate(var(--rot)); opacity:0; }
+  }
+
+  /* Racha de días */
+  .racha-badge{
+    display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600;
+    color:var(--amber); background:var(--amber-bg); padding:4px 10px; border-radius:20px; margin-top:8px;
+  }
 </style>
 </head>
 <body>
@@ -336,6 +374,9 @@
 </div>
 
 <div class="app" id="appRoot">
+<div class="top-safe-spacer"><img src="./icon-192.png" alt=""></div>
+<img src="./mascota.gif" id="mascotaFlotante" class="mascota-flotante" alt="">
+
 
   <!-- ============ INICIO ============ -->
   <div class="tab active" id="tab-inicio">
@@ -344,6 +385,7 @@
         <div>
           <p class="eyebrow">Control de Gastos</p>
           <h1 id="saludoInicio">Hola 👋</h1>
+          <div id="rachaBadge"></div>
         </div>
         <button class="gear-btn" onclick="abrirConfiguracion()">⚙️</button>
       </div>
@@ -434,7 +476,7 @@
       </div>
       <div class="field">
         <label for="monto">Monto (COP)</label>
-        <div class="amount-wrap"><span>$</span><input type="number" id="monto" placeholder="0" inputmode="numeric" min="0" step="1"></div>
+        <div class="amount-wrap"><span>$</span><input type="text" id="monto" placeholder="0" inputmode="numeric" autocomplete="off"></div>
       </div>
       <button class="btn" id="btnGuardar" onclick="guardarGasto()">Guardar gasto</button>
     </div>
@@ -593,6 +635,38 @@
 </div>
 
 <!-- ============ MODAL: configuración ============ -->
+<!-- ============ MODAL: editar gasto ============ -->
+<div class="overlay" id="overlayEditarGasto">
+  <div class="modal">
+    <h3>Editar gasto</h3>
+    <div class="field">
+      <label for="editGastoFecha">Fecha</label>
+      <input type="date" id="editGastoFecha">
+    </div>
+    <div class="field">
+      <label for="editGastoCategoria">Categoría</label>
+      <select id="editGastoCategoria"><option value="">Cargando…</option></select>
+    </div>
+    <div class="field">
+      <label for="editGastoDescripcion">Descripción</label>
+      <input type="text" id="editGastoDescripcion" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="editGastoMonto">Monto (COP)</label>
+      <div class="amount-wrap"><span>$</span><input type="text" id="editGastoMonto" inputmode="numeric"></div>
+    </div>
+    <div class="field" style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" id="editGastoReembolso" style="width:auto;">
+      <label style="margin:0; text-transform:none; font-size:13px;" for="editGastoReembolso">Es un reembolso (resta del total)</label>
+    </div>
+    <div class="btn-row">
+      <button class="btn secondary" onclick="cerrarModalEditarGasto()">Cancelar</button>
+      <button class="btn" id="btnGuardarEditarGasto" onclick="guardarEdicionGasto()">Guardar</button>
+    </div>
+    <button class="btn secondary" style="margin-top:10px; background:var(--red-bg); color:var(--red); border-color:var(--red-bg);" onclick="eliminarGastoDesdeUltimos()">🗑 Eliminar este gasto</button>
+  </div>
+</div>
+
 <div class="overlay" id="overlayConfig">
   <div class="modal">
     <h3>⚙️ Configuración</h3>

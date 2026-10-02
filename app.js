@@ -79,10 +79,12 @@ var COLORES = ['#1F3864','#2E7D32','#B7791F','#8E44AD','#1B9C85','#C62828','#6B7
 var mesSeleccionadoInicio = null;
 var mesSeleccionadoFijos = null;
 var mesSeleccionadoAnalisis = null;
+var ultimosGastosCache = [];
+var editandoGastoFila = null;
 var mesesInfo = null;
 var fijaActual = null; // {fila, montoPlaneado} en el modal
 var ultimoResumen = null;
-var mostrarIngresos = localStorage.getItem('mostrarIngresos') === 'true';
+var mostrarIngresos = false; // siempre empieza oculto al abrir la app (no se recuerda entre sesiones)
 var tipoMovimiento = 'gasto';
 var editandoFila = null;
 var editandoCategoria = null;
@@ -201,9 +203,102 @@ function intentarDesbloqueo(){
   });
 }
 
+// ---------------- FORMATO DE MILES (campos de monto) ----------------
+function soloDigitos_(valor){
+  return (valor || '').toString().replace(/\D/g, '');
+}
+function formatearMiles_(valor){
+  var digitos = soloDigitos_(valor);
+  if(!digitos) return '';
+  return Number(digitos).toLocaleString('es-CO');
+}
+(function(){
+  ['monto', 'editGastoMonto'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el){
+      el.addEventListener('input', function(e){
+        e.target.value = formatearMiles_(e.target.value);
+      });
+    }
+  });
+})();
+
 function hoyISO(){
   var d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function mostrarMascota(){
+  if(document.hidden) return; // no molestar si la app está en segundo plano
+  var el = document.getElementById('mascotaFlotante');
+  if(!el) return;
+  el.classList.add('show');
+  setTimeout(function(){ el.classList.remove('show'); }, 4000); // se queda 4s asomada y se esconde sola
+}
+
+// ---------------- SALUDO SEGÚN LA HORA ----------------
+function aplicarSaludo(){
+  var h = new Date().getHours();
+  var texto = h < 5 ? 'Buenas noches 🌙' : h < 12 ? 'Buenos días ☀️' : h < 19 ? 'Buenas tardes 👋' : 'Buenas noches 🌙';
+  var el = document.getElementById('saludoInicio');
+  if(el) el.textContent = texto;
+}
+
+// ---------------- RACHA DE DÍAS REGISTRANDO GASTOS ----------------
+function cargarRacha(){
+  apiCall('getUltimosGastos', { n: 60 }).then(function(lista){
+    var el = document.getElementById('rachaBadge');
+    if(!el || !lista || lista.length === 0) return;
+    var fechas = {};
+    lista.forEach(function(tx){
+      var p = tx.fecha.split('/'); // dd/mm/yyyy
+      if(p.length !== 3) return;
+      var key = p[2]+'-'+p[1]+'-'+p[0];
+      fechas[key] = true;
+    });
+    var dias = Object.keys(fechas).sort().reverse();
+    if(dias.length === 0) return;
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var cursor = new Date(hoy);
+    var racha = 0;
+    // permite que el día de hoy aún no tenga gasto sin romper la racha de ayer
+    if(!fechas[isoLocal_(cursor)]) cursor.setDate(cursor.getDate()-1);
+    while(fechas[isoLocal_(cursor)]){
+      racha++;
+      cursor.setDate(cursor.getDate()-1);
+    }
+    if(racha >= 2){
+      el.innerHTML = '<span class="racha-badge">🔥 '+racha+' días seguidos</span>';
+    }
+  }).catch(function(){});
+}
+function isoLocal_(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+// ---------------- FRASES RANDOM DE CARGA ----------------
+var FRASES_CARGA = ['Cargando…', 'Contando billetes…', 'Sumando monedas…', 'Consultando la hoja…', 'Un segundo…'];
+function fraseCarga(){
+  return FRASES_CARGA[Math.floor(Math.random()*FRASES_CARGA.length)];
+}
+
+// ---------------- CONFETI ----------------
+function lanzarConfeti(){
+  var colores = ['#C9A961','#34D399','#F87171','#8E44AD','#1B9C85'];
+  for(var i=0; i<16; i++){
+    var pieza = document.createElement('div');
+    pieza.className = 'confeti-pieza';
+    var x = Math.random()*100;
+    var rot = (Math.random()*360)+'deg';
+    pieza.style.left = x+'vw';
+    pieza.style.background = colores[i % colores.length];
+    pieza.style.animationDelay = (Math.random()*0.2)+'s';
+    pieza.style.setProperty('--rot', rot);
+    document.body.appendChild(pieza);
+    setTimeout(function(p){ return function(){ p.remove(); }; }(pieza), 1700);
+  }
+}
+function vibrar_(ms){
+  if(navigator.vibrate){ try{ navigator.vibrate(ms); }catch(e){} }
 }
 function fmt(n){
   n = Number(n)||0;
@@ -270,6 +365,9 @@ function iniciarApp(){
   cargarCategorias();
   actualizarBadgeCola();
   sincronizarPendientes();
+  aplicarSaludo();
+  cargarRacha();
+  setInterval(mostrarMascota, 15000);
 
   apiCall('getMesesDisponibles', {}).then(function(info){
     mesesInfo = info;
@@ -319,15 +417,19 @@ function cargarInicio(){
     renderDisponible();
   });
 
-  apiCall('getUltimosGastos', { n: 6 }).then(function(lista){
+  apiCall('getUltimosGastos', { n: 15 }).then(function(lista){
+    ultimosGastosCache = lista || [];
     if(!lista || lista.length===0){
       document.getElementById('listaUltimos').innerHTML = '<div class="empty">Aún no has registrado gastos.</div>';
       return;
     }
     document.getElementById('listaUltimos').innerHTML = lista.map(function(tx){
       var esReembolso = Number(tx.monto) < 0;
-      return '<div class="tx-item"><div class="tx-left"><div class="cat">'+tx.categoria+'</div>' +
-        '<div class="desc">'+(tx.descripcion||'')+'</div></div>' +
+      var desc = (tx.descripcion || '').trim();
+      var repetida = desc.toLowerCase() === (tx.categoria || '').trim().toLowerCase();
+      var lineaDesc = (desc && !repetida) ? '<div class="desc">'+desc+'</div>' : '';
+      return '<div class="tx-item" style="cursor:pointer;" onclick="abrirEditarGastoPorFila('+tx.fila+')"><div class="tx-left"><div class="cat">'+tx.categoria+'</div>' +
+        lineaDesc + '</div>' +
         '<div class="tx-right"><div class="monto'+(esReembolso?' refund':'')+'">'+(esReembolso?'+':'')+fmt(Math.abs(tx.monto))+'</div><div class="fecha">'+tx.fecha+'</div></div></div>';
     }).join('');
   }).catch(function(err){
@@ -342,7 +444,6 @@ function cardDisponibleHead(){
 
 function toggleIngresos(){
   mostrarIngresos = !mostrarIngresos;
-  localStorage.setItem('mostrarIngresos', mostrarIngresos);
   renderDisponible();
 }
 
@@ -364,19 +465,30 @@ function renderDisponible(){
   animarNumero(document.getElementById('numDisponible'), r.restante);
 }
 
+function polarToCartesian_(cx, cy, r, angleDeg){
+  var rad = (angleDeg-90) * Math.PI / 180;
+  return { x: cx + r*Math.cos(rad), y: cy + r*Math.sin(rad) };
+}
+function describeArc_(cx, cy, r, startAngle, endAngle){
+  var start = polarToCartesian_(cx, cy, r, endAngle);
+  var end = polarToCartesian_(cx, cy, r, startAngle);
+  var largeArcFlag = (endAngle - startAngle) <= 180 ? "0" : "1";
+  return ["M", start.x, start.y, "A", r, r, 0, largeArcFlag, 0, end.x, end.y].join(" ");
+}
 function renderDonut(categorias){
   var total = categorias.reduce(function(s,c){ return s+c.valor; }, 0);
-  var r = 42, circ = 2*Math.PI*r;
-  var acumulado = 0;
+  var r = 42, cx = 50, cy = 50;
+  var acumAngulo = 0;
   var svg = '<svg width="100" height="100" viewBox="0 0 100 100">';
   svg += '<circle cx="50" cy="50" r="'+r+'" fill="none" style="stroke:var(--border)" stroke-width="14"></circle>';
   categorias.forEach(function(c,i){
     var frac = c.valor/total;
-    var largo = frac*circ;
-    var offset = circ - acumulado;
-    svg += '<circle cx="50" cy="50" r="'+r+'" fill="none" stroke="'+COLORES[i%COLORES.length]+'" stroke-width="14" ' +
-      'stroke-dasharray="'+largo+' '+circ+'" stroke-dashoffset="'+offset+'" transform="rotate(-90 50 50)"></circle>';
-    acumulado += largo;
+    var anguloInicio = acumAngulo;
+    var anguloFin = acumAngulo + frac*360;
+    var anguloFinSeguro = Math.min(anguloFin, anguloInicio + 359.99); // evita arco de 360° exactos (degenerado)
+    var d = describeArc_(cx, cy, r, anguloInicio, anguloFinSeguro);
+    svg += '<path d="'+d+'" fill="none" stroke="'+COLORES[i%COLORES.length]+'" stroke-width="14" stroke-linecap="butt"></path>';
+    acumAngulo = anguloFin;
   });
   svg += '</svg>';
   document.getElementById('donut').innerHTML = svg;
@@ -386,13 +498,63 @@ function renderDonut(categorias){
   }).join('');
 }
 
+// ---------------- EDITAR / ELIMINAR un gasto (desde Últimos gastos) ----------------
+function abrirEditarGastoPorFila(fila){
+  var tx = ultimosGastosCache.find(function(t){ return t.fila === fila; });
+  if(!tx) return;
+  editandoGastoFila = fila;
+  document.getElementById('editGastoFecha').value = tx.fechaISO;
+  document.getElementById('editGastoDescripcion').value = tx.descripcion || '';
+  document.getElementById('editGastoMonto').value = formatearMiles_(String(Math.abs(tx.monto)));
+  document.getElementById('editGastoReembolso').checked = Number(tx.monto) < 0;
+
+  var sel = document.getElementById('editGastoCategoria');
+  sel.innerHTML = '<option value="">Cargando…</option>';
+  apiCall('getCategorias', {}).then(function(categorias){
+    sel.innerHTML = categorias.map(function(c){ return '<option value="'+c.nombre+'">'+c.nombre+'</option>'; }).join('');
+    sel.value = tx.categoria;
+  }).catch(function(){ sel.innerHTML = '<option value="">Sin conexión</option>'; });
+
+  document.getElementById('overlayEditarGasto').classList.add('open');
+}
+function cerrarModalEditarGasto(){ document.getElementById('overlayEditarGasto').classList.remove('open'); }
+
+function guardarEdicionGasto(){
+  var fecha = document.getElementById('editGastoFecha').value;
+  var categoria = document.getElementById('editGastoCategoria').value;
+  var descripcion = document.getElementById('editGastoDescripcion').value;
+  var montoTxt = soloDigitos_(document.getElementById('editGastoMonto').value);
+  var esReembolso = document.getElementById('editGastoReembolso').checked;
+
+  if(!categoria){ alert('Elige una categoría.'); return; }
+  if(!montoTxt || Number(montoTxt)<=0){ alert('Escribe un monto válido.'); return; }
+  var montoFinal = esReembolso ? -Number(montoTxt) : Number(montoTxt);
+
+  var btn = document.getElementById('btnGuardarEditarGasto');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Guardando…';
+  apiCall('actualizarGasto', { fila: editandoGastoFila, categoria: categoria, descripcion: descripcion, monto: montoFinal, fecha: fecha }).then(function(resp){
+    btn.disabled = false; btn.textContent = 'Guardar';
+    if(resp.ok){ cerrarModalEditarGasto(); cargarInicio(); } else { alert(resp.mensaje); }
+  }).catch(function(err){
+    btn.disabled = false; btn.textContent = 'Guardar';
+    alert('Error: '+err.message);
+  });
+}
+
+function eliminarGastoDesdeUltimos(){
+  if(!confirm('¿Eliminar este gasto? No se puede deshacer.')) return;
+  apiCall('eliminarGasto', { fila: editandoGastoFila }).then(function(resp){
+    if(resp.ok){ cerrarModalEditarGasto(); cargarInicio(); } else { alert(resp.mensaje); }
+  }).catch(function(err){ alert('Error: '+err.message); });
+}
+
 // ---------------- FIJOS ----------------
 function cargarFijos(){
   if(!mesesInfo) return;
   renderPills('pillsFijos', mesesInfo.meses, mesSeleccionadoFijos, function(m){
     mesSeleccionadoFijos = m; cargarFijos();
   });
-  document.getElementById('progresoTexto').textContent = 'Cargando…';
+  document.getElementById('progresoTexto').textContent = fraseCarga();
   document.getElementById('listaFijos').innerHTML = skeletonLineas(5, [40,40,40,40,40]);
 
   apiCall('getFijosEstado', { mesAbr: mesSeleccionadoFijos }).then(function(r){
@@ -409,12 +571,25 @@ function cargarFijos(){
       return;
     }
     document.getElementById('listaFijos').innerHTML = r.items.map(function(it){
-      var multiParte = it.parte && it.parte.indexOf('/1') === -1;
+      var parteTxt = String(it.parte || '');
+      var parteValida = /^\d+\/\d+$/.test(parteTxt); // solo mostramos si es "número/número", ej. "1/2"
+      var multiParte = parteValida && parteTxt.indexOf('/1') === -1;
       var diaTag = '<span class="dia-pago" onclick="abrirModalDia(\''+it.categoria+'\','+(it.diaPago||'null')+')">' +
         (it.diaPago ? 'vence día '+it.diaPago : 'poner día') + '</span>';
+
+      var lineaMonto, lineaFecha = '';
+      if(it.pagado){
+        var diff = it.montoPagado - it.montoPlaneado;
+        var colorDiff = diff > 0 ? 'var(--red)' : diff < 0 ? 'var(--green)' : 'var(--text)';
+        lineaMonto = 'Presupuestado '+fmt(it.montoPlaneado)+' → Pagado <b style="color:'+colorDiff+';">'+fmt(it.montoPagado)+'</b>';
+        lineaFecha = '<div class="fijo-fecha">'+it.fechaPago+'</div>';
+      } else {
+        lineaMonto = 'Presupuestado '+fmt(it.montoPlaneado)+diaTag;
+      }
+
       return '<div class="fijo-item">' +
         '<div class="fijo-left"><div class="nombre">'+it.categoria + (multiParte? '<span class="parte">'+it.parte+'</span>':'')+'</div>' +
-        '<div class="monto">'+fmt(it.montoPlaneado)+(it.pagado? ' · pagado '+fmt(it.montoPagado)+' ('+it.fechaPago+')':'')+diaTag+'</div></div>' +
+        '<div class="monto">'+lineaMonto+'</div>' + lineaFecha + '</div>' +
         '<div class="fijo-right">' +
         (it.pagado? '' : '<button class="edit-btn" onclick="abrirModalMonto('+it.fila+','+it.montoPlaneado+')">✎</button>') +
         (it.pagado? '' : '<button class="edit-btn" onclick="abrirModalEliminar('+it.fila+')">🗑</button>') +
@@ -448,7 +623,7 @@ function confirmarPago(){
   apiCall('marcarFijoPagado', { fila: fijaActual.fila, monto: monto, fechaStr: fecha }).then(function(resp){
     btn.disabled = false; btn.textContent = 'Confirmar';
     cerrarModalPago();
-    if(resp.ok){ cargarFijos(); cargarInicio(); }
+    if(resp.ok){ cargarFijos(); cargarInicio(); lanzarConfeti(); vibrar_(40); }
     else { alert(resp.mensaje); }
   }).catch(function(err){
     btn.disabled = false; btn.textContent = 'Confirmar';
@@ -601,7 +776,7 @@ function guardarGasto(){
     fecha: document.getElementById('fecha').value,
     categoria: document.getElementById('categoria').value,
     descripcion: document.getElementById('descripcion').value,
-    monto: document.getElementById('monto').value,
+    monto: soloDigitos_(document.getElementById('monto').value),
     tipo: tipoMovimiento
   };
   if(!datos.categoria || datos.categoria==='__nueva__'){ mostrarToast('toastAgregar','Elige o crea una categoría primero.', false); return; }
@@ -613,6 +788,7 @@ function guardarGasto(){
     btn.disabled = false; btn.textContent = textoOriginal;
     if(resp.ok){
       mostrarToast('toastAgregar', resp.mensaje, true);
+      vibrar_(30);
       document.getElementById('descripcion').value = '';
       document.getElementById('monto').value = '';
       document.getElementById('fecha').value = hoyISO();
@@ -727,8 +903,7 @@ function renderFijoVariable(r){
 
 function renderRanking(r){
   if(!r.categorias || r.categorias.length === 0){
-    var debugTxt = r.debug ? '<pre style="white-space:pre-wrap; font-size:10px; color:var(--muted); text-align:left; margin-top:10px;">'+JSON.stringify(r.debug, null, 1)+'</pre>' : '';
-    document.getElementById('listaRanking').innerHTML = '<div class="empty">Sin gastos registrados este mes.</div>' + debugTxt;
+    document.getElementById('listaRanking').innerHTML = '<div class="empty">Sin gastos registrados este mes.</div>';
     return;
   }
   var maxGasto = r.categorias[0].gasto;
