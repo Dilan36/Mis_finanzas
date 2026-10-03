@@ -385,13 +385,17 @@ function iniciarApp(){
 
   // Un solo viaje a Google en vez de 4: categorías + resumen + últimos gastos + fijos, todo junto.
   apiCall('getDatosIniciales', { mesAbr: mesSeleccionadoInicio }).then(function(datos){
+    if(!datos || datos.ok === false || !datos.resumenMes){
+      throw new Error(datos && datos.mensaje ? datos.mensaje : 'Respuesta inesperada del servidor.');
+    }
     renderCategoriaOptions_(datos.categorias);
     try { localStorage.setItem('categoriasCache', JSON.stringify(datos.categorias)); } catch(e){}
     pintarResumenMes_(datos.resumenMes);
     pintarUltimosGastos_(datos.ultimosGastos);
     pintarFijos_(datos.fijosEstado);
   }).catch(function(err){
-    pintarResumenMes_({ error: 'Sin conexión (' + err.message + ')' });
+    var msg = (err && err.message) ? err.message : 'Error desconocido';
+    pintarResumenMes_({ error: 'Sin conexión (' + msg + ')' });
     document.getElementById('listaUltimos').innerHTML = '<div class="empty">Sin conexión.</div>';
     document.getElementById('listaFijos').innerHTML = '<div class="empty">Sin conexión.</div>';
     if(document.getElementById('categoria').options.length === 0){
@@ -440,6 +444,7 @@ function cargarInicio(){
 // Pinta la tarjeta de Disponible + la gráfica, a partir de una respuesta de getResumenMes
 // (venga de una llamada individual o del paquete combinado de arranque).
 function pintarResumenMes_(r){
+  r = r || { error: 'Sin datos del servidor.' };
   ultimoResumen = r;
   renderDisponible();
   if(!r.error && r.categorias && r.categorias.length>0){
