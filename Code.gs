@@ -99,6 +99,7 @@ function enrutarAccion_(action, p) {
     case 'agregarFijoEstado': return agregarFijoEstado(p.categoria, p.monto, p.aplicarATodos, p.mesUnico);
     case 'eliminarFijoEstado': return eliminarFijoEstado(p.fila, p.aplicarATodos);
     case 'getAhorroResumen': return getAhorroResumen();
+    case 'getDatosIniciales': return getDatosIniciales(p.mesAbr);
     case 'actualizarGasto': return actualizarGasto(p.fila, p.categoria, p.descripcion, p.monto, p.fecha);
     case 'eliminarGasto': return eliminarGasto(p.fila);
     case 'getAnalisisMes': return getAnalisisMes(p.mesAbr);
@@ -159,6 +160,18 @@ function formatoFecha_(d) {
 // ============================================================
 function getMesesDisponibles() {
   return { meses: MESES_ABR, actual: mesActualIndex_() };
+}
+
+// Junta en un solo viaje lo que la app necesita al abrirse (categorías +
+// resumen del mes + últimos gastos + estado de fijos), para no hacer
+// 4 peticiones separadas al arrancar.
+function getDatosIniciales(mesAbr) {
+  return {
+    categorias: getCategorias(),
+    resumenMes: getResumenMes(mesAbr),
+    ultimosGastos: getUltimosGastos(15),
+    fijosEstado: getFijosEstado(mesAbr)
+  };
 }
 
 // ============================================================

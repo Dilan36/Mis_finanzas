@@ -356,7 +356,6 @@ window.addEventListener('DOMContentLoaded', function(){
 
 function iniciarApp(){
   document.getElementById('fecha').value = hoyISO();
-  cargarCategorias();
   actualizarBadgeCola();
   sincronizarPendientes();
   aplicarSaludo();
@@ -367,8 +366,36 @@ function iniciarApp(){
   mesSeleccionadoInicio = mesesInfo.meses[mesesInfo.actual];
   mesSeleccionadoFijos = mesesInfo.meses[mesesInfo.actual];
   mesSeleccionadoAnalisis = mesesInfo.meses[mesesInfo.actual];
-  cargarInicio();
-  cargarFijos();
+
+  // Mientras llega la respuesta: pastillas de mes ya interactivas + esqueletos.
+  renderPills('pillsInicio', mesesInfo.meses, mesSeleccionadoInicio, function(m){ mesSeleccionadoInicio = m; cargarInicio(); });
+  renderPills('pillsFijos', mesesInfo.meses, mesSeleccionadoFijos, function(m){ mesSeleccionadoFijos = m; cargarFijos(); });
+  document.getElementById('cardDisponible').innerHTML = cardDisponibleHead() + skeletonLineas(3, [34,14,14]);
+  document.getElementById('listaUltimos').innerHTML = skeletonLineas(4, [30,30,30,30]);
+  document.getElementById('progresoTexto').textContent = fraseCarga();
+  document.getElementById('listaFijos').innerHTML = skeletonLineas(5, [40,40,40,40,40]);
+
+  // Mostrar categorías guardadas del celular de inmediato, si hay.
+  try {
+    var catCache = JSON.parse(localStorage.getItem('categoriasCache') || 'null');
+    if(catCache && catCache.length) renderCategoriaOptions_(catCache);
+  } catch(e){}
+
+  // Un solo viaje a Google en vez de 4: categorías + resumen + últimos gastos + fijos, todo junto.
+  apiCall('getDatosIniciales', { mesAbr: mesSeleccionadoInicio }).then(function(datos){
+    renderCategoriaOptions_(datos.categorias);
+    try { localStorage.setItem('categoriasCache', JSON.stringify(datos.categorias)); } catch(e){}
+    pintarResumenMes_(datos.resumenMes);
+    pintarUltimosGastos_(datos.ultimosGastos);
+    pintarFijos_(datos.fijosEstado);
+  }).catch(function(err){
+    pintarResumenMes_({ error: 'Sin conexión (' + err.message + ')' });
+    document.getElementById('listaUltimos').innerHTML = '<div class="empty">Sin conexión.</div>';
+    document.getElementById('listaFijos').innerHTML = '<div class="empty">Sin conexión.</div>';
+    if(document.getElementById('categoria').options.length === 0){
+      document.getElementById('categoria').innerHTML = '<option value="">Sin conexión</option>';
+    }
+  });
 }
 
 function calcularMesesDisponibles_(){
@@ -400,38 +427,43 @@ function cargarInicio(){
   document.getElementById('cardDisponible').innerHTML = cardDisponibleHead() + skeletonLineas(3, [34,14,14]);
   document.getElementById('listaUltimos').innerHTML = skeletonLineas(4, [30,30,30,30]);
 
-  apiCall('getResumenMes', { mesAbr: mesSeleccionadoInicio }).then(function(r){
-    ultimoResumen = r;
-    renderDisponible();
-    if(!r.error && r.categorias && r.categorias.length>0){
-      document.getElementById('cardChart').style.display='block';
-      renderDonut(r.categorias);
-    } else {
-      document.getElementById('cardChart').style.display='none';
-    }
-  }).catch(function(err){
-    ultimoResumen = { error: 'Sin conexión (' + err.message + ')' };
-    renderDisponible();
+  apiCall('getResumenMes', { mesAbr: mesSeleccionadoInicio }).then(pintarResumenMes_).catch(function(err){
+    pintarResumenMes_({ error: 'Sin conexión (' + err.message + ')' });
   });
-
-  apiCall('getUltimosGastos', { n: 15 }).then(function(lista){
-    ultimosGastosCache = lista || [];
-    if(!lista || lista.length===0){
-      document.getElementById('listaUltimos').innerHTML = '<div class="empty">Aún no has registrado gastos.</div>';
-      return;
-    }
-    document.getElementById('listaUltimos').innerHTML = lista.map(function(tx){
-      var esReembolso = Number(tx.monto) < 0;
-      var desc = (tx.descripcion || '').trim();
-      var repetida = desc.toLowerCase() === (tx.categoria || '').trim().toLowerCase();
-      var lineaDesc = (desc && !repetida) ? '<div class="desc">'+desc+'</div>' : '';
-      return '<div class="tx-item" style="cursor:pointer;" onclick="abrirEditarGastoPorFila('+tx.fila+')"><div class="tx-left"><div class="cat">'+tx.categoria+'</div>' +
-        lineaDesc + '</div>' +
-        '<div class="tx-right"><div class="monto'+(esReembolso?' refund':'')+'">'+(esReembolso?'+':'')+fmt(Math.abs(tx.monto))+'</div><div class="fecha">'+tx.fecha+'</div></div></div>';
-    }).join('');
-  }).catch(function(err){
+  apiCall('getUltimosGastos', { n: 15 }).then(pintarUltimosGastos_).catch(function(){
     document.getElementById('listaUltimos').innerHTML = '<div class="empty">Sin conexión.</div>';
   });
+}
+
+// Pinta la tarjeta de Disponible + la gráfica, a partir de una respuesta de getResumenMes
+// (venga de una llamada individual o del paquete combinado de arranque).
+function pintarResumenMes_(r){
+  ultimoResumen = r;
+  renderDisponible();
+  if(!r.error && r.categorias && r.categorias.length>0){
+    document.getElementById('cardChart').style.display='block';
+    renderDonut(r.categorias);
+  } else {
+    document.getElementById('cardChart').style.display='none';
+  }
+}
+
+// Pinta "Últimos gastos", a partir de una respuesta de getUltimosGastos.
+function pintarUltimosGastos_(lista){
+  ultimosGastosCache = lista || [];
+  if(!lista || lista.length===0){
+    document.getElementById('listaUltimos').innerHTML = '<div class="empty">Aún no has registrado gastos.</div>';
+    return;
+  }
+  document.getElementById('listaUltimos').innerHTML = lista.map(function(tx){
+    var esReembolso = Number(tx.monto) < 0;
+    var desc = (tx.descripcion || '').trim();
+    var repetida = desc.toLowerCase() === (tx.categoria || '').trim().toLowerCase();
+    var lineaDesc = (desc && !repetida) ? '<div class="desc">'+desc+'</div>' : '';
+    return '<div class="tx-item" style="cursor:pointer;" onclick="abrirEditarGastoPorFila('+tx.fila+')"><div class="tx-left"><div class="cat">'+tx.categoria+'</div>' +
+      lineaDesc + '</div>' +
+      '<div class="tx-right"><div class="monto'+(esReembolso?' refund':'')+'">'+(esReembolso?'+':'')+fmt(Math.abs(tx.monto))+'</div><div class="fecha">'+tx.fecha+'</div></div></div>';
+  }).join('');
 }
 
 function cardDisponibleHead(){
@@ -554,7 +586,13 @@ function cargarFijos(){
   document.getElementById('progresoTexto').textContent = fraseCarga();
   document.getElementById('listaFijos').innerHTML = skeletonLineas(5, [40,40,40,40,40]);
 
-  apiCall('getFijosEstado', { mesAbr: mesSeleccionadoFijos }).then(function(r){
+  apiCall('getFijosEstado', { mesAbr: mesSeleccionadoFijos }).then(pintarFijos_).catch(function(){
+    document.getElementById('listaFijos').innerHTML = '<div class="empty">Sin conexión.</div>';
+  });
+}
+
+// Pinta la pestaña Fijos, a partir de una respuesta de getFijosEstado.
+function pintarFijos_(r){
     if(r.error){
       document.getElementById('listaFijos').innerHTML = '<div class="empty">'+r.error+'</div>';
       return;
@@ -593,9 +631,6 @@ function cargarFijos(){
         '<div class="check-btn'+(it.pagado?' done':'')+'" onclick="clickFijo('+it.fila+','+it.montoPlaneado+','+it.pagado+')">✓</div>' +
         '</div></div>';
     }).join('');
-  }).catch(function(err){
-    document.getElementById('listaFijos').innerHTML = '<div class="empty">Sin conexión.</div>';
-  });
 }
 
 function clickFijo(fila, montoPlaneado, pagado){
