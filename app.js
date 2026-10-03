@@ -227,14 +227,6 @@ function hoyISO(){
   var d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
-function mostrarMascota(){
-  if(document.hidden) return; // no molestar si la app está en segundo plano
-  var el = document.getElementById('mascotaFlotante');
-  if(!el) return;
-  el.classList.add('show');
-  setTimeout(function(){ el.classList.remove('show'); }, 4000); // se queda 4s asomada y se esconde sola
-}
-
 // ---------------- SALUDO SEGÚN LA HORA ----------------
 function aplicarSaludo(){
   var h = new Date().getHours();
@@ -367,7 +359,6 @@ function iniciarApp(){
   sincronizarPendientes();
   aplicarSaludo();
   cargarRacha();
-  setInterval(mostrarMascota, 15000);
 
   apiCall('getMesesDisponibles', {}).then(function(info){
     mesesInfo = info;

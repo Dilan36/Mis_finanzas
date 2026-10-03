@@ -3,7 +3,7 @@
 // internet. Los datos (Sheets) SIEMPRE necesitan conexión; esto solo
 // evita la pantalla en blanco cuando no hay señal.
 
-const CACHE_NAME = 'control-gastos-v16';
+const CACHE_NAME = 'control-gastos-v17';
 const ASSETS = [
   './',
   './index.html',
@@ -12,8 +12,7 @@ const ASSETS = [
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  './icon-512-maskable.png',
-  './mascota.gif'
+  './icon-512-maskable.png'
 ];
 
 self.addEventListener('install', (event) => {

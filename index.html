@@ -74,7 +74,7 @@
   .app{ max-width:480px; margin:0 auto; min-height:100vh; position:relative; padding-bottom:78px; }
 
   .topbar{
-    padding:12px 18px 16px;
+    padding:6px 18px 16px;
     border-bottom:1px solid var(--border);
   }
   .topbar .eyebrow{
@@ -326,15 +326,6 @@
   .lock-screen p{ color:var(--muted); font-size:13px; margin:0 0 22px; }
   .lock-error{ color:var(--red) !important; margin-top:14px !important; font-size:12px !important; min-height:16px; }
 
-  /* Mascota flotante (aparece de vez en cuando) */
-  .mascota-flotante{
-    position:fixed; top:-140px; right:16px; width:92px; z-index:60;
-    transition:top .55s cubic-bezier(.34,1.56,.64,1);
-    pointer-events:none; filter:drop-shadow(0 6px 10px rgba(0,0,0,.25));
-  }
-  
-
-  .mascota-flotante.show{ top:50px; }
   .topbar > .eyebrow{ margin-top:15px; }
   .topbar > .ahorro-hero{ margin-top:15px; }
 
@@ -369,7 +360,6 @@
 </div>
 
 <div class="app" id="appRoot">
-<img src="./mascota.gif" id="mascotaFlotante" class="mascota-flotante" alt="">
 
 
   <!-- ============ INICIO ============ -->
