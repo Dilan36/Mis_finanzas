@@ -600,6 +600,7 @@ function cargarFijos(){
 
 // Pinta la pestaña Fijos, a partir de una respuesta de getFijosEstado.
 function pintarFijos_(r){
+    r = r || { error: 'Sin datos del servidor.' };
     if(r.error){
       document.getElementById('listaFijos').innerHTML = '<div class="empty">'+r.error+'</div>';
       return;
