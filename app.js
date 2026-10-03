@@ -80,6 +80,7 @@ var mesSeleccionadoInicio = null;
 var mesSeleccionadoFijos = null;
 var mesSeleccionadoAnalisis = null;
 var ultimosGastosCache = [];
+var ahorroCargado = false;
 var editandoGastoFila = null;
 var mesesInfo = null;
 var fijaActual = null; // {fila, montoPlaneado} en el modal
@@ -335,6 +336,7 @@ function irATab(nombre){
     ind.style.transform = 'translateX(' + (idx*100) + '%)';
   }
   if(nombre === 'analisis') cargarAnalisis();
+  if(nombre === 'ahorro' && !ahorroCargado) cargarAhorro();
 }
 
 // ---------------- INIT ----------------
@@ -360,17 +362,21 @@ function iniciarApp(){
   aplicarSaludo();
   cargarRacha();
 
-  apiCall('getMesesDisponibles', {}).then(function(info){
-    mesesInfo = info;
-    mesSeleccionadoInicio = info.meses[info.actual];
-    mesSeleccionadoFijos = info.meses[info.actual];
-    mesSeleccionadoAnalisis = info.meses[info.actual];
-    cargarInicio();
-    cargarFijos();
-  }).catch(function(err){
-    document.getElementById('cardDisponible').innerHTML = cardDisponibleHead() + '<div class="empty">Sin conexión con la hoja. Revisa tu internet.</div>';
-  });
-  cargarAhorro();
+  // Esto es solo lógica de fecha (qué mes es hoy), no necesita red ni la hoja.
+  mesesInfo = calcularMesesDisponibles_();
+  mesSeleccionadoInicio = mesesInfo.meses[mesesInfo.actual];
+  mesSeleccionadoFijos = mesesInfo.meses[mesesInfo.actual];
+  mesSeleccionadoAnalisis = mesesInfo.meses[mesesInfo.actual];
+  cargarInicio();
+  cargarFijos();
+}
+
+function calcularMesesDisponibles_(){
+  var MESES_ABR = ['Jul','Ago','Sep','Oct','Nov','Dic'];
+  var m = new Date().getMonth() + 1; // 1-12
+  var idx = m - 7; // Jul = 0
+  if(idx < 0 || idx > 5) idx = 0;
+  return { meses: MESES_ABR, actual: idx };
 }
 
 function renderPills(contId, meses, seleccionado, onClick){
@@ -712,25 +718,40 @@ function confirmarEliminarFijo(todos){
 }
 
 // ---------------- AGREGAR ----------------
+function renderCategoriaOptions_(categorias, seleccionar){
+  var sel = document.getElementById('categoria');
+  var valorActual = seleccionar || sel.value;
+  sel.innerHTML = '';
+  if(categorias && categorias.length>0){
+    categorias.forEach(function(c){
+      var opt = document.createElement('option');
+      opt.value = c.nombre;
+      opt.textContent = c.nombre + (c.tipo? '  ·  '+c.tipo : '');
+      sel.appendChild(opt);
+    });
+  }
+  var optNueva = document.createElement('option');
+  optNueva.value = '__nueva__';
+  optNueva.textContent = '➕ Nueva categoría...';
+  sel.appendChild(optNueva);
+  if(valorActual) sel.value = valorActual;
+}
+
 function cargarCategorias(seleccionar){
+  // 1) Si hay una copia guardada del celular, la muestra de inmediato (instantáneo).
+  try {
+    var cache = JSON.parse(localStorage.getItem('categoriasCache') || 'null');
+    if(cache && cache.length) renderCategoriaOptions_(cache, seleccionar);
+  } catch(e){}
+
+  // 2) Mientras tanto, pide la versión real a la hoja y actualiza en silencio.
   apiCall('getCategorias', {}).then(function(categorias){
-    var sel = document.getElementById('categoria');
-    sel.innerHTML = '';
-    if(categorias && categorias.length>0){
-      categorias.forEach(function(c){
-        var opt = document.createElement('option');
-        opt.value = c.nombre;
-        opt.textContent = c.nombre + (c.tipo? '  ·  '+c.tipo : '');
-        sel.appendChild(opt);
-      });
-    }
-    var optNueva = document.createElement('option');
-    optNueva.value = '__nueva__';
-    optNueva.textContent = '➕ Nueva categoría...';
-    sel.appendChild(optNueva);
-    if(seleccionar) sel.value = seleccionar;
+    renderCategoriaOptions_(categorias, seleccionar);
+    try { localStorage.setItem('categoriasCache', JSON.stringify(categorias)); } catch(e){}
   }).catch(function(){
-    document.getElementById('categoria').innerHTML = '<option value="">Sin conexión</option>';
+    if(document.getElementById('categoria').options.length === 0){
+      document.getElementById('categoria').innerHTML = '<option value="">Sin conexión</option>';
+    }
   });
 }
 function onCategoriaChange(){
@@ -796,6 +817,7 @@ function guardarGasto(){
 
 // ---------------- AHORRO ----------------
 function cargarAhorro(){
+  ahorroCargado = true;
   apiCall('getAhorroResumen', {}).then(function(r){
     if(r.error){ document.getElementById('listaAhorro').innerHTML = '<div class="empty">'+r.error+'</div>'; return; }
     document.getElementById('saldoAhorro').textContent = fmt(r.saldoActual);

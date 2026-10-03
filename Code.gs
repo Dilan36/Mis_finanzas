@@ -36,22 +36,52 @@ function doGet() {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+var SHEET_LOG = 'Log de Accesos';
+var ACCIONES_ESCRITURA = [
+  'registrarGasto', 'marcarFijoPagado', 'desmarcarFijoPagado', 'actualizarMontoFijo',
+  'actualizarDiaPago', 'agregarFijoEstado', 'eliminarFijoEstado', 'actualizarAhorroMes', 'crearCategoria',
+  'actualizarGasto', 'eliminarGasto'
+];
+
 // Todas las acciones reales entran por aquí, como POST con el body:
 // { "key": "...", "action": "nombreFuncion", "params": {...} }
 function doPost(e) {
   var respuesta;
+  var action = '(sin acción)';
   try {
     var body = JSON.parse(e.postData.contents);
+    action = body.action || action;
     if (body.key !== API_KEY) {
       respuesta = { ok: false, mensaje: 'Llave inválida.' };
+      registrarLog_(action, false, 'Llave incorrecta');
     } else {
-      respuesta = enrutarAccion_(body.action, body.params || {});
+      respuesta = enrutarAccion_(action, body.params || {});
+      if (ACCIONES_ESCRITURA.indexOf(action) > -1) {
+        registrarLog_(action, respuesta && respuesta.ok !== false, respuesta ? respuesta.mensaje : '');
+      }
     }
   } catch (err) {
     respuesta = { ok: false, mensaje: 'Error: ' + err.message };
+    registrarLog_(action, false, 'Error: ' + err.message);
   }
   return ContentService.createTextOutput(JSON.stringify(respuesta))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Anota en la hoja "Log de Accesos" los intentos con llave incorrecta y
+// toda acción que modifique datos (crea la hoja sola si no existe).
+function registrarLog_(accion, ok, detalle) {
+  try {
+    var hoja = ss_().getSheetByName(SHEET_LOG);
+    if (!hoja) {
+      hoja = ss_().insertSheet(SHEET_LOG);
+      hoja.appendRow(['Fecha y hora', 'Acción', 'Resultado', 'Detalle']);
+      hoja.getRange(1, 1, 1, 4).setFontWeight('bold');
+    }
+    hoja.appendRow([new Date(), accion, ok ? 'OK' : 'RECHAZADO', detalle || '']);
+  } catch (e) {
+    // si el registro falla, nunca debe romper la respuesta principal
+  }
 }
 
 function enrutarAccion_(action, p) {
@@ -69,6 +99,9 @@ function enrutarAccion_(action, p) {
     case 'agregarFijoEstado': return agregarFijoEstado(p.categoria, p.monto, p.aplicarATodos, p.mesUnico);
     case 'eliminarFijoEstado': return eliminarFijoEstado(p.fila, p.aplicarATodos);
     case 'getAhorroResumen': return getAhorroResumen();
+    case 'actualizarGasto': return actualizarGasto(p.fila, p.categoria, p.descripcion, p.monto, p.fecha);
+    case 'eliminarGasto': return eliminarGasto(p.fila);
+    case 'getAnalisisMes': return getAnalisisMes(p.mesAbr);
     case 'actualizarAhorroMes': return actualizarAhorroMes(p.fila, p.aportado, p.retiro, p.nota);
     case 'crearCategoria': return crearCategoria(p.nombre, p.tipo, p.montoInicial);
     case 'getSpreadsheetUrl': return getSpreadsheetUrl();
@@ -191,8 +224,11 @@ function getUltimosGastos(n) {
   var filas = [];
   for (var i = 0; i < datos.length; i++) {
     if (datos[i][0] !== '' && datos[i][0] !== null) {
+      var f = new Date(datos[i][0]);
       filas.push({
-        fecha: formatoFecha_(datos[i][0]),
+        fila: i + 4,
+        fecha: formatoFecha_(f),
+        fechaISO: isoFecha_(f),
         categoria: datos[i][1],
         descripcion: datos[i][2],
         monto: datos[i][3]
@@ -201,17 +237,58 @@ function getUltimosGastos(n) {
   }
   return filas.slice(-n).reverse();
 }
+function isoFecha_(d) {
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+
+// ============================================================
+// EDITAR / ELIMINAR un gasto ya registrado (desde "Últimos gastos")
+// ============================================================
+function actualizarGasto(fila, categoria, descripcion, monto, fecha) {
+  try {
+    var hoja = ss_().getSheetByName(SHEET_REGISTRO);
+    if (!hoja) return { ok: false, mensaje: 'No encontré la hoja "Registro".' };
+    var categorias = getCategorias().map(function (c) { return c.nombre; });
+    if (categorias.indexOf(categoria) === -1) return { ok: false, mensaje: 'Esa categoría no existe.' };
+    var montoNum = parseFloat(monto);
+    if (isNaN(montoNum) || montoNum === 0) return { ok: false, mensaje: 'El monto no es válido.' };
+    var fechaDate = fecha ? new Date(fecha + 'T12:00:00') : new Date();
+    hoja.getRange(fila, 1, 1, 4).setValues([[fechaDate, categoria, descripcion || '', montoNum]]);
+    return { ok: true, mensaje: 'Gasto actualizado ✅' };
+  } catch (err) {
+    return { ok: false, mensaje: 'Error: ' + err.message };
+  }
+}
+
+function eliminarGasto(fila) {
+  try {
+    var hoja = ss_().getSheetByName(SHEET_REGISTRO);
+    if (!hoja) return { ok: false, mensaje: 'No encontré la hoja "Registro".' };
+    hoja.getRange(fila, 1, 1, 4).clearContent();
+    return { ok: true, mensaje: 'Gasto eliminado ✅' };
+  } catch (err) {
+    return { ok: false, mensaje: 'Error: ' + err.message };
+  }
+}
 
 // ============================================================
 // CATEGORÍAS (para el selector de Agregar)
 // ============================================================
 function getCategorias() {
+  var cache = CacheService.getScriptCache();
+  var cacheKey = 'categorias_v1';
+  var cacheado = cache.get(cacheKey);
+  if (cacheado) return JSON.parse(cacheado);
+
   var hoja = ss_().getSheetByName(SHEET_CATEGORIAS);
   if (!hoja) return [];
   var valores = hoja.getRange('A2:B' + hoja.getLastRow()).getValues();
-  return valores
+  var resultado = valores
     .filter(function (fila) { return fila[0] && fila[0].toString().trim() !== ''; })
     .map(function (fila) { return { nombre: fila[0], tipo: fila[1] }; });
+
+  cache.put(cacheKey, JSON.stringify(resultado), 120); // 2 minutos
+  return resultado;
 }
 
 // ============================================================
@@ -243,6 +320,7 @@ function crearCategoria(nombre, tipo, montoInicial) {
     hoja.getRange(filaLibre, 3).setValue('Mensual');
     hoja.getRange(filaLibre, 4).setValue(parseFloat(montoInicial) || 0);
 
+    CacheService.getScriptCache().remove('categorias_v1');
     return { ok: true, mensaje: 'Categoría "' + nombre + '" creada ✅', nombre: nombre };
   } catch (err) {
     return { ok: false, mensaje: 'Error: ' + err.message };
@@ -265,7 +343,7 @@ function registrarGasto(datos) {
     if (isNaN(monto) || monto <= 0) return { ok: false, mensaje: 'El monto no es válido.' };
     if (datos.tipo === 'reembolso') monto = -monto; // se resta del total de la categoría
 
-    var fecha = datos.fecha ? new Date(datos.fecha + 'T00:00:00') : new Date();
+    var fecha = datos.fecha ? new Date(datos.fecha + 'T12:00:00') : new Date();
     var filaLibre = encontrarFilaLibre_(hojaReg);
     if (filaLibre === -1) return { ok: false, mensaje: 'No queda espacio en "Registro".' };
 
@@ -317,13 +395,14 @@ function marcarFijoPagado(fila, monto, fechaStr) {
     var parte = hoja.getRange(fila, 3).getValue();
     var montoFinal = parseFloat(monto);
     if (isNaN(montoFinal) || montoFinal <= 0) return { ok: false, mensaje: 'Monto no válido.' };
-    var fecha = fechaStr ? new Date(fechaStr + 'T00:00:00') : new Date();
+    var fecha = fechaStr ? new Date(fechaStr + 'T12:00:00') : new Date();
 
     var filaLibre = encontrarFilaLibre_(hojaReg);
     if (filaLibre === -1) return { ok: false, mensaje: 'No hay espacio en "Registro".' };
 
     var totalPartes = (parte || '').toString();
-    var descripcion = totalPartes.indexOf('/1') > -1 ? categoria : categoria + ' (parte ' + parte + ')';
+    var parteValida = /^\d+\/\d+$/.test(totalPartes);
+    var descripcion = (!parteValida || totalPartes.indexOf('/1') > -1) ? categoria : categoria + ' (parte ' + totalPartes + ')';
     hojaReg.getRange(filaLibre, 1, 1, 4).setValues([[fecha, categoria, descripcion, montoFinal]]);
 
     hoja.getRange(fila, 5).setValue(true);
@@ -583,6 +662,63 @@ function getSpreadsheetUrl() {
   return ss_().getUrl();
 }
 // ============================================================
+// ANÁLISIS: desglose completo por categoría, fijo vs variable,
+// comparación con el mes anterior y tendencia de los 6 meses.
+// ============================================================
+function getAnalisisMes(mesAbr) {
+  var hoja = ss_().getSheetByName(SHEET_RESUMEN);
+  if (!hoja) return { error: 'No encontré la hoja "Resumen".' };
+
+  var rowTituloCat = buscarFilaPorEtiqueta_(hoja, 'Gasto por Categoría y Mes');
+  if (rowTituloCat === -1) return { error: 'No encontré la tabla de categorías.' };
+  var rowHeadCat = rowTituloCat + 1;
+  var colMes = buscarColumnaEnFila_(hoja, rowHeadCat, mesAbr);
+
+  var categorias = [];
+  var totalFijo = 0, totalVariable = 0, totalGeneral = 0;
+  var rowTotal = -1;
+  for (var r = rowHeadCat + 1; r < rowHeadCat + 100; r++) {
+    var nombre = hoja.getRange(r, 1).getValue();
+    if (nombre === 'TOTAL') { rowTotal = r; break; }
+    if (nombre && nombre.toString().trim() !== '') {
+      var tipo = hoja.getRange(r, 2).getValue();
+      var presupuesto = Number(hoja.getRange(r, 3).getValue()) || 0;
+      var valor = Number(hoja.getRange(r, colMes).getValue()) || 0;
+      if (valor > 0) {
+        categorias.push({ nombre: nombre, tipo: tipo, presupuesto: presupuesto, gasto: valor });
+      }
+      totalGeneral += valor;
+      if (tipo === 'Fijo') totalFijo += valor; else totalVariable += valor;
+    }
+  }
+  categorias.sort(function (a, b) { return b.gasto - a.gasto; });
+
+  var tendencia = MESES_ABR.map(function (m) {
+    var col = buscarColumnaEnFila_(hoja, rowHeadCat, m);
+    var val = rowTotal > -1 ? Number(hoja.getRange(rowTotal, col).getValue()) : 0;
+    return { mes: m, total: val || 0 };
+  });
+
+  var idxMes = MESES_ABR.indexOf(mesAbr);
+  var mesAnteriorTotal = idxMes > 0 ? tendencia[idxMes - 1].total : null;
+
+  var DIAS_MES = { Jul: 31, Ago: 31, Sep: 30, Oct: 31, Nov: 30, Dic: 31 };
+  var hoy = new Date();
+  var esMesActual = (hoy.getMonth() + 1 - 7) === idxMes;
+  var diasDivisor = esMesActual ? hoy.getDate() : DIAS_MES[mesAbr];
+
+  return {
+    categorias: categorias,
+    totalFijo: totalFijo,
+    totalVariable: totalVariable,
+    totalGeneral: totalGeneral,
+    tendencia: tendencia,
+    mesAnteriorTotal: mesAnteriorTotal,
+    promedioDiario: diasDivisor ? totalGeneral / diasDivisor : 0
+  };
+}
+
+// ============================================================
 // AHORRO
 // ============================================================
 function getAhorroResumen() {
@@ -617,4 +753,27 @@ function actualizarAhorroMes(fila, aportado, retiro, nota) {
   } catch (err) {
     return { ok: false, mensaje: 'Error: ' + err.message };
   }
+}
+
+/**
+ * MANTENER EL SERVIDOR "DESPIERTO" (evitar el arranque en frío)
+ * ------------------------------------------------------------
+ * Esta función no hace nada importante a propósito — solo toca algo
+ * liviano para que Apps Script mantenga el motor ya "caliente".
+ * Para que sirva de algo, hay que programarla para que corra sola
+ * cada cierto tiempo (una sola vez, no hay que repetir esto):
+ *
+ * 1. En el editor de Apps Script, ícono del reloj ⏰ ("Activadores").
+ * 2. "Añadir activador".
+ * 3. Función a ejecutar: mantenerActivo
+ * 4. Origen del evento: Basado en tiempo.
+ * 5. Tipo: Temporizador por minutos > Cada 10 minutos.
+ * 6. Guardar.
+ *
+ * Esto no elimina el arranque en frío al 100% (es una limitación real
+ * de Apps Script, sobre todo si llevas un buen rato sin usarla), pero
+ * sí lo reduce bastante si lo usas en horarios activos del día.
+ */
+function mantenerActivo() {
+  CacheService.getScriptCache().put('keepalive', String(Date.now()), 60);
 }

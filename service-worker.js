@@ -3,7 +3,7 @@
 // internet. Los datos (Sheets) SIEMPRE necesitan conexión; esto solo
 // evita la pantalla en blanco cuando no hay señal.
 
-const CACHE_NAME = 'control-gastos-v17';
+const CACHE_NAME = 'control-gastos-v18';
 const ASSETS = [
   './',
   './index.html',
