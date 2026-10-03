@@ -197,7 +197,7 @@ function intentarDesbloqueo(){
     if(ok){
       document.getElementById('lockScreen').classList.remove('show');
       document.getElementById('appRoot').style.display = 'block';
-      iniciarApp();
+      // iniciarApp() ya se disparó desde que apareció el candado — no hace falta pedir todo de nuevo.
     } else {
       err.textContent = 'No se pudo verificar. Intenta de nuevo.';
     }
@@ -345,9 +345,11 @@ window.addEventListener('DOMContentLoaded', function(){
   if(faceIdActivo){
     document.getElementById('lockScreen').classList.add('show');
     document.getElementById('appRoot').style.display = 'none';
-  } else {
-    iniciarApp();
   }
+  // Pedimos los datos ya mismo, aunque el candado siga en pantalla — así,
+  // cuando termines de verificarte, probablemente ya estén listos (o casi).
+  // La pantalla sigue tapada por el candado mientras tanto, nada se ve antes de tiempo.
+  iniciarApp();
 
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('./service-worker.js').catch(function(){});
